@@ -4,6 +4,11 @@ Multimodal Emotion Recognition Using Cross-Modal Translation based on three moda
 Libraries Installed:
 Multimodal-SDK, h5py, and pandas to work with CMU-MOSEI datasets.
 CMU-MultimodalSDK for downloading and processing multimodal datasets.
+torch: Core PyTorch library for tensor computations and neural network operations.
+torch.nn: To build neural network components (e.g., layers, loss functions).
+torch.utils.data: For dataset and dataloader management to handle batching and shuffling.
+mmdatasdk: To download, process, and align multimodal datasets.
+scikit-learn: For performance evaluation metrics like precision, recall, and F1-score.
 # 1. Data Downloading:
 High-level features such as audio (COVAREP), visual (OpenFace), and text (GloVe embeddings) are downloaded using CMU-MultimodalSDK.
 Challenges Faced: System crashes during alignment of GloVe vectors with other modalities due to computational limits and incomplete metadata for computational sequences.
