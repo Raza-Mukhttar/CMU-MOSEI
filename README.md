@@ -1,7 +1,7 @@
 # CMU-MOSEI
 Multimodal Emotion Recognition Using Cross-Modal Translation based on three modalities (visual, audio and text) with CMU-MOSEI dataset. Detailed discription of the working and issues faced are discussed below:
-1. Dataset Preparation and Preprocessing
-# Libraries Installed:
+# 1. Dataset Preparation and Preprocessing
+Libraries Installed:
 Multimodal-SDK, h5py, and pandas to work with CMU-MOSEI datasets.
 CMU-MultimodalSDK for downloading and processing multimodal datasets.
 # 1. Data Downloading:
@@ -38,7 +38,7 @@ Warnings related to tensor processing in the Transformer module.
 Dataset Issues: Misaligned features and incomplete metadata caused interruptions.
 Significant data entries were removed due to lack of shared sequences.
 Resource Constraints: System crashes during large operations, indicating insufficient computational resources.
-# Challenges ca be Resoled by:
+# Challenges can be resoled by:
 Fix dataset alignment by resolving metadata issues.
 Use a high-performance system to handle computational requirements.
 Debug and test each module independently before full integration to avoid cascading errors.
