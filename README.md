@@ -35,7 +35,7 @@ Architecture: Linear layers with ReLU activation are used for transformation.
 Structure: Combines Encoder, Decoder, and Discriminator to process input features.
 Uses softmax activation in encoding and decoding stages and sigmoid activation in the discriminator.
 Purpose: Generates latent representations and reconstructs data for meaningful feature translation.
-#6. Multimodal Transformer
+# 6. Multimodal Transformer
 Design: Separate Transformer Encoder modules for audio, visual, and text.
 Fully connected layers for fusing and classifying concatenated features.
 Workflow: Each modality is transformed independently.
