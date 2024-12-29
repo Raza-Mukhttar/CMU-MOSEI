@@ -11,7 +11,7 @@ Original file is located at
 **Installing some mendatory libraries to access CMU-MOSEI dataset via SDK**
 """
 
-!pip install multimodal-sdk
+pip install multimodal-sdk
 !pip install h5py
 !pip install pandas
 
