@@ -3,15 +3,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import accuracy_score
 import numpy as np
-
 import random
-import seaborn as sns
-import matplotlib.pyplot as plt
+import torchaudio
+from torchaudio.transforms import Vol
+from sklearn.metrics import accuracy_score
 
-
-# Load the dataset which already downloaded in the directory
+# --- Data Loading ---
 def load_data(file_path):
     with open(file_path, 'rb') as f:
         data = pickle.load(f)
@@ -20,99 +18,49 @@ def load_data(file_path):
 file_path = './cmu-mosei/unaligned_50.pkl'
 data = load_data(file_path)
 
-# Inspect the data structure
-print("Keys in dataset:", data.keys())
+# --- VAEGAN Implementation (Simplified Example) ---
+class VAEGAN(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super(VAEGAN, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, latent_dim),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, input_dim),
+        )
 
-print(data['train'].keys())
+    def forward(self, x):
+        z = self.encoder(x)
+        x_reconstructed = self.decoder(z)
+        return x_reconstructed, z
 
-train_data = data['train']
-print("Keys in train data:", train_data.keys())
-print("Example raw text:", train_data['raw_text'][:5])  # View the first 5 entries of raw text
-print("Example audio shape:", train_data['audio'][:5])  # View the first 5 audio feature entries
-print("Example vision shape:", train_data['vision'][:5])  # View the first 5 vision feature entries
-print("Example labels:", train_data['classification_labels'][:5])  # View the first 5 labels
+# Apply VAEGAN for missing modality augmentation
+def apply_vaegan(data, vaegan_model, weights):
+    original = torch.tensor(data, dtype=torch.float32)
+    generated, _ = vaegan_model(original)
+    combined = weights[0] * original + weights[1] * generated
+    return combined.detach().numpy()
 
-audio_data = train_data['audio']
-visual_data = train_data['vision']
-text_data = train_data['text']  # Or 'text_bert' if you prefer BERT embeddings
-labels = train_data['classification_labels']
-
-dataset = list(zip(audio_data, visual_data, text_data, labels))  # Combine modalities and labels
-
-# Print the shapes and labels for the first 5 entries
-for i, (audio, visual, text, label) in enumerate(dataset[:5]):  # Limit to first 5
-    print(f"Entry {i + 1}:")
-    print(f"Audio Shape: {audio.shape}")
-    print(f"Visual Shape: {visual.shape}")
-    print(f"Text: {text}")
-    print(f"Label: {label}\n")
-
-
-# Define the embedding dimension and number of heads
-embed_dim = 128  # Must be divisible by num_heads
-num_heads = 4    # Adjust this to ensure embed_dim % num_heads == 0
-
-
-# Example Transformer layer
-transformer_layer = torch.nn.Transformer(
-    d_model=embed_dim,  # Embedding dimension
-    nhead=num_heads,    # Number of attention heads
-    num_encoder_layers=2,
-    num_decoder_layers=2,
-    dim_feedforward=512,
-    dropout=0.1,
-    activation='relu',
-)
-
-print(f"embed_dim: {embed_dim}, num_heads: {num_heads}")
-
-
-if torch.cuda.is_available():
-    print("CUDA is available. GPU is being used!")
-    print(f"Device name: {torch.cuda.get_device_name(0)}")
-else:
-    print("CUDA is not available. CPU is being used.")
-
-
-
-import torchaudio
-from torchaudio.transforms import Resample, Vol, TimeStretch, MelSpectrogram
-from torchvision.transforms import Compose
-from random import randint
-
-# Augmentation Functions
-
+# --- Data Augmentation ---
 def augment_audio(audio):
-    # Apply random pitch shift
-    sample_rate = 16000  # Assuming 16 kHz sample rate for the audio
-    pitch_shift = randint(-2, 2)  # Shift by -2 to 2 semitones
+    sample_rate = 16000
+    pitch_shift = random.randint(-2, 2)
+    volume = random.uniform(0.7, 1.3)
     audio = torchaudio.transforms.PitchShift(sample_rate, n_steps=pitch_shift)(audio)
-    
-    # Apply random volume adjustment
-    volume = random.uniform(0.7, 1.3)  # Random scaling between 70% and 130%
     audio = Vol(volume)(audio)
-
-    # Optionally, add background noise (not implemented here but could be added)
     return audio
 
-
-def augment_text(text):
-    # Simple text augmentation: Randomly shuffle words in the text
-    words = text.split()
-    if len(words) > 2:
-        idx1, idx2 = random.sample(range(len(words)), 2)
-        words[idx1], words[idx2] = words[idx2], words[idx1]
-    return " ".join(words)
-
-# Step 1: Dataset Preparation
+# --- Dataset ---
 class CMUMOSEIDataset(Dataset):
-    def __init__(self, audio, vision, text, labels, augment_audio_fn=None, augment_text_fn=None):
+    def __init__(self, audio, vision, text, labels):
         self.audio = audio
         self.vision = vision
         self.text = text
         self.labels = labels
-        self.augment_audio_fn = augment_audio_fn
-        self.augment_text_fn = augment_text_fn
 
     def __len__(self):
         return len(self.labels)
@@ -122,52 +70,28 @@ class CMUMOSEIDataset(Dataset):
         vision = torch.tensor(self.vision[idx], dtype=torch.float32)
         text = torch.tensor(self.text[idx], dtype=torch.float32)
         label = torch.tensor(self.labels[idx], dtype=torch.long)
-        
-        # Apply augmentations
-        if self.augment_audio_fn:
-            audio = self.augment_audio_fn(audio)
-        
-        if self.augment_text_fn:
-            text = self.augment_text_fn(text)
-
         return audio, vision, text, label
 
-    
-
-# Prepare the dataset
-def prepare_dataloader(data, batch_size, augment_audio_fn=None, augment_text_fn=None):
-    dataset = CMUMOSEIDataset(
-        audio=data['audio'],
-        vision=data['vision'],
-        text=data['text'],
-        labels=data['classification_labels'],
-        augment_audio_fn= augment_audio_fn,
-        augment_text_fn= augment_text_fn
-    )
+def prepare_dataloader(audio, vision, text, labels, batch_size):
+    dataset = CMUMOSEIDataset(audio, vision, text, labels)
     return DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-train_loader = prepare_dataloader(data['train'], batch_size=64, augment_audio_fn=augment_audio, augment_text_fn=augment_text)
-
-# Step 2: Multimodal Transformer
+# --- Multimodal Transformer ---
 class MultimodalTransformer(nn.Module):
     def __init__(self, input_dim_audio, input_dim_vision, input_dim_text, hidden_dim, num_classes):
         super(MultimodalTransformer, self).__init__()
-
         self.audio_transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=input_dim_audio, nhead=2, dim_feedforward=hidden_dim),
+            nn.TransformerEncoderLayer(d_model=input_dim_audio, nhead=1, dim_feedforward=hidden_dim),
             num_layers=2
         )
-
         self.vision_transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=input_dim_vision, nhead=5, dim_feedforward=hidden_dim),
+            nn.TransformerEncoderLayer(d_model=input_dim_vision, nhead=1, dim_feedforward=hidden_dim),
             num_layers=2
         )
-
         self.text_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=input_dim_text, nhead=2, dim_feedforward=hidden_dim),
             num_layers=2
         )
-
         self.fusion = nn.Linear(input_dim_audio + input_dim_vision + input_dim_text, hidden_dim)
         self.classifier = nn.Linear(hidden_dim, num_classes)
 
@@ -186,7 +110,8 @@ class MultimodalTransformer(nn.Module):
 
         return logits
 
-def train_model(data, input_dims, hidden_dim, num_classes, batch_size, num_epochs, learning_rate):
+# --- Training Function ---
+def train_model(audio, vision, text, labels, input_dims, hidden_dim, num_classes, batch_size, num_epochs, learning_rate):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = MultimodalTransformer(
@@ -199,8 +124,8 @@ def train_model(data, input_dims, hidden_dim, num_classes, batch_size, num_epoch
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    train_loader = prepare_dataloader(data['train'], batch_size=batch_size)
-    test_loader = prepare_dataloader(data['test'], batch_size=batch_size)
+    train_loader = prepare_dataloader(audio, vision, text, labels, batch_size)
+    test_loader = prepare_dataloader(audio,vision, text, labels, batch_size=batch_size)
 
     train_accuracies = []
     test_accuracies = []
@@ -209,9 +134,7 @@ def train_model(data, input_dims, hidden_dim, num_classes, batch_size, num_epoch
 
     for epoch in range(num_epochs):
         model.train()
-        total_loss = 0
-        correct_train = 0
-        total_train = 0
+        total_loss, correct_train, total_train = 0, 0, 0
 
         for audio, vision, text, labels in train_loader:
             audio, vision, text, labels = audio.to(device), vision.to(device), text.to(device), labels.to(device)
@@ -222,12 +145,11 @@ def train_model(data, input_dims, hidden_dim, num_classes, batch_size, num_epoch
             loss.backward()
             optimizer.step()
 
-            # Training accuracy
             _, predicted = torch.max(outputs, 1)
             correct_train += (predicted == labels).sum().item()
             total_train += labels.size(0)
             total_loss += loss.item()
-
+        
         # Calculate metrics for training
         train_loss = total_loss / len(train_loader)
         train_accuracy = correct_train / total_train
@@ -260,7 +182,27 @@ def train_model(data, input_dims, hidden_dim, num_classes, batch_size, num_epoch
 
         print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}, Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
 
-# Hyperparameters
+
+    return model
+
+# --- Evaluation Function ---
+def evaluate_model(model, audio, vision, text, labels, batch_size):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.eval()
+    eval_loader = prepare_dataloader(audio, vision, text, labels, batch_size)
+
+    correct, total = 0, 0
+    with torch.no_grad():
+        for audio, vision, text, labels in eval_loader:
+            audio, vision, text, labels = audio.to(device), vision.to(device), text.to(device), labels.to(device)
+            outputs = model(audio, vision, text)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+    print(f"Evaluation Accuracy: {correct / total:.4f}")
+
+# --- Main Pipeline ---
 input_dims = {'audio': 74, 'vision': 35, 'text': 768}
 hidden_dim = 128
 num_classes = 6
@@ -268,4 +210,26 @@ batch_size = 64
 num_epochs = 10
 learning_rate = 0.001
 
-train_model(data, input_dims, hidden_dim, num_classes, batch_size, num_epochs, learning_rate)
+# VAEGAN model and weights
+audio_vaegan = VAEGAN(input_dim=74, latent_dim=32)
+vision_vaegan = VAEGAN(input_dim=35, latent_dim=16)
+text_vaegan = VAEGAN(input_dim=768, latent_dim=64)
+weights = [0.7, 0.3]
+
+# Combine data using VAEGAN
+audio_combined = apply_vaegan(data['train']['audio'], audio_vaegan, weights)
+vision_combined = apply_vaegan(data['train']['vision'], vision_vaegan, weights)
+text_combined = apply_vaegan(data['train']['text'], text_vaegan, weights)
+labels = data['train']['classification_labels']
+
+# Train and evaluate
+print("Training...")
+trained_model = train_model(audio_combined, vision_combined, text_combined, labels, input_dims, hidden_dim, num_classes, batch_size, num_epochs, learning_rate)
+
+print("\nEvaluating...")
+test_audio_combined = apply_vaegan(data['test']['audio'], audio_vaegan, weights)
+test_vision_combined = apply_vaegan(data['test']['vision'], vision_vaegan, weights)
+test_text_combined = apply_vaegan(data['test']['text'], text_vaegan, weights)
+test_labels = data['test']['classification_labels']
+
+evaluate_model(trained_model, test_audio_combined, test_vision_combined, test_text_combined, test_labels, batch_size)
